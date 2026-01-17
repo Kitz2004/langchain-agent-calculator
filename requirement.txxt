@@ -1,0 +1,12 @@
+
+# ✅ `requirements.txt`
+
+This is **clean**, **compatible**, and **safe**.
+
+```txt
+streamlit
+python-dotenv
+langchain
+langchain-core
+langchain-community
+langchain-google-genai
