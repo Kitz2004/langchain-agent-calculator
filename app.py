@@ -1,45 +1,60 @@
+# app.py
 import streamlit as st
-from agent import detect_operation, execute_agent
+from agent import detect_intent, execute_agent
 
-st.set_page_config(page_title="Consent-Based AI Calculator", page_icon="🧮")
-st.title("Consent-Based AI Calculator")
+st.set_page_config(page_title="Agentic Calculator", page_icon="🧮")
+st.title("Agentic Calculator (Human-in-the-loop)")
 
-# Initialize session state
-if "operation" not in st.session_state:
-    st.session_state.operation = None
-    st.session_state.expression = None
-    st.session_state.awaiting_consent = False
+query = st.text_input("Example: add 5 and 3")
 
-query = st.text_input("Ask me:")
+# Session state
+if "intent" not in st.session_state:
+    st.session_state.intent = None
 
+if "decision" not in st.session_state:
+    st.session_state.decision = None
+
+# -----------------------------
+# STEP 1: Submit query
+# -----------------------------
 if st.button("Submit") and query:
-    op, expr = detect_operation(query)
-    if op:
-        st.session_state.operation = op
-        st.session_state.expression = expr
-        st.session_state.awaiting_consent = True
-    else:
-        st.error("Could not detect a valid operation.")
+    intent = detect_intent(query)
 
-# Ask for consent
-if st.session_state.awaiting_consent:
+    if intent is None:
+        st.error("Could not understand the request. Please rephrase.")
+        st.stop()
+
+    st.session_state.intent = intent
+    st.session_state.decision = None
+
+# -----------------------------
+# STEP 2: Ask for consent
+# -----------------------------
+if st.session_state.intent and st.session_state.decision is None:
+    intent = st.session_state.intent
+
     st.info(
-        f"Detected operation: **{st.session_state.operation}**\n\n"
-        f"Expression: `{st.session_state.expression}`"
+        f"I detected an **{intent['operation']}** operation\n\n"
+        f"Numbers: **{intent['a']}** and **{intent['b']}**\n\n"
+        "Do you want me to call the agent?"
     )
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("✅ Accept"):
-            result = execute_agent(
-                st.session_state.operation,
-                st.session_state.expression
-            )
-            st.success(f"Result: {result}")
-            st.session_state.awaiting_consent = False
+        if st.button("Accept"):
+            st.session_state.decision = "accept"
 
     with col2:
-        if st.button("❌ Reject"):
-            st.warning("Agent execution cancelled by user.")
-            st.session_state.awaiting_consent = False
+        if st.button("Reject"):
+            st.session_state.decision = "reject"
+
+# -----------------------------
+# STEP 3: Execute or stop
+# -----------------------------
+if st.session_state.decision == "accept":
+    result = execute_agent(st.session_state.intent)
+    st.success(f"Result: {result}")
+
+elif st.session_state.decision == "reject":
+    st.warning("You rejected the agent execution.")
