@@ -1,72 +1,122 @@
+# agent.py
 from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import json
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.tools import tool
 
-# ---------------- LLM ----------------
+# -----------------------------
+# LLM (ONLY for intent detection)
+# -----------------------------
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     temperature=0,
     google_api_key=os.getenv("GEMINI_API_KEY")
 )
 
-# ---------------- AGENTS (TOOLS) ----------------
+# -----------------------------
+# TOOL AGENTS (PURE LOGIC)
+# -----------------------------
+@tool
+def add(a: float, b: float) -> float:
+    """Add two numbers"""
+    return a + b
 
 @tool
-def add(expr: str) -> str:
-    """Add two numbers given an expression like '4+5'."""
-    a, b = map(float, expr.split("+"))
-    return str(a + b)
+def subtract(a: float, b: float) -> float:
+    """Subtract two numbers"""
+    return a - b
 
 @tool
-def subtract(expr: str) -> str:
-    """Subtract two numbers given an expression like '8-3'."""
-    a, b = map(float, expr.split("-"))
-    return str(a - b)
+def multiply(a: float, b: float) -> float:
+    """Multiply two numbers"""
+    return a * b
 
 @tool
-def multiply(expr: str) -> str:
-    """Multiply two numbers given an expression like '6*7'."""
-    a, b = map(float, expr.split("*"))
-    return str(a * b)
+def divide(a: float, b: float):
+    """Divide two numbers"""
+    if b == 0:
+        return "Cannot divide by zero"
+    return a / b
 
-@tool
-def divide(expr: str) -> str:
-    """Divide two numbers given an expression like '8/2'."""
-    a, b = map(float, expr.split("/"))
-    return str(a / b)
-
-# ---------------- PROMPT ----------------
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "Extract ONLY the math expression like 8/2, 4+5"),
+# -----------------------------
+# INTENT DETECTION PROMPT
+# -----------------------------
+intent_prompt = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        "You extract math intent.\n"
+        "Return ONLY valid JSON.\n"
+        "Format:\n"
+        "{ \"operation\": \"add|subtract|multiply|divide\", \"a\": number, \"b\": number }"
+    ),
     ("human", "{input}")
 ])
 
-# ---------------- INTENT DETECTION ----------------
-def detect_operation(user_input: str):
-    expression = (prompt | llm).invoke({"input": user_input}).content.strip()
+# -----------------------------
+# SAFE INTENT DETECTION
+# -----------------------------
+import re
 
-    if "+" in expression:
-        return "ADD", expression
-    if "-" in expression:
-        return "SUBTRACT", expression
-    if "*" in expression:
-        return "MULTIPLY", expression
-    if "/" in expression:
-        return "DIVIDE", expression
+def detect_intent(user_input: str):
+    # ---------- RULE-BASED FIRST ----------
+    numbers = list(map(float, re.findall(r"\d+\.?\d*", user_input.lower())))
 
-    return None, None
+    if len(numbers) == 2:
+        a, b = numbers
 
-# ---------------- EXECUTION ----------------
-def execute_agent(operation: str, expression: str):
-    if operation == "ADD":
-        return add.invoke(expression)
-    if operation == "SUBTRACT":
-        return subtract.invoke(expression)
-    if operation == "MULTIPLY":
-        return multiply.invoke(expression)
-    if operation == "DIVIDE":
-        return divide.invoke(expression)
+        if "add" in user_input or "sum" in user_input or "plus" in user_input:
+            return {"operation": "add", "a": a, "b": b}
+
+        if "subtract" in user_input or "minus" in user_input:
+            return {"operation": "subtract", "a": a, "b": b}
+
+        if "multiply" in user_input or "times" in user_input:
+            return {"operation": "multiply", "a": a, "b": b}
+
+        if "divide" in user_input or "by" in user_input:
+            return {"operation": "divide", "a": a, "b": b}
+
+    # ---------- LLM FALLBACK ----------
+    try:
+        response = llm.invoke(
+            intent_prompt.format_messages(input=user_input)
+        )
+
+        raw = response.content.strip()
+
+        if not raw:
+            return None
+
+        # extract JSON safely
+        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not json_match:
+            return None
+
+        return json.loads(json_match.group())
+
+    except Exception:
+        return None
+
+
+# -----------------------------
+# CONTROLLED TOOL EXECUTION
+# -----------------------------
+def execute_agent(intent: dict):
+    op = intent.get("operation")
+    a = intent.get("a")
+    b = intent.get("b")
+
+    if op == "add":
+        return add.invoke({"a": a, "b": b})
+    elif op == "subtract":
+        return subtract.invoke({"a": a, "b": b})
+    elif op == "multiply":
+        return multiply.invoke({"a": a, "b": b})
+    elif op == "divide":
+        return divide.invoke({"a": a, "b": b})
+    else:
+        return "Unsupported operation"
